@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "/media/abdu/LinuxHome/Embedded_Linux/git_ignoring/gsoc/learning/20-libcam",
+    "command": "g++ -std=c++17 -I/home/abdu/.local/libcamera-install/include/libcamera -c main.cpp -o main.o",
+    "file": "main.cpp"
+  }
+]

@@ -52,7 +52,7 @@ int main(){
 
     void* map_handle = gbm_bo_map(my_bo, 0, 0, width, height, GBM_BO_TRANSFER_WRITE, &my_stride, &map_data);
     
-    for (int y = 0; y < 120; y++) {
+    for (int y = 0; y < 120; y++) { 
         uint8_t *row = (uint8_t*)map_handle + y * my_stride;
         row[0] = (uint8_t)y ;
     }
