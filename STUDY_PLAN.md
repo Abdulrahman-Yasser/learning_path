@@ -49,11 +49,42 @@ library itself, not shipping a feature.
 - [ ] Task 3: build the pipeline element-by-element instead of via a parse string (`gst_element_factory_make`, manual `gst_element_link`), and pull frames out via an `appsink` callback instead of a video sink, printing buffer size/timestamp per frame.
 - [ ] Master Task: hardware-accelerated decode/encode path relevant to the project's known RPi5 constraint (HEVC only, no H.264 hw decode) — build a pipeline that decodes a real HEVC file via `v4l2h265dec` (or equivalent) into raw frames, confirm it actually engages hardware (not software fallback) via `GST_DEBUG` output.
 
-## C1 — Wayland [NOT STARTED]
-- [ ] Task 1: connect to a Wayland display (`wl_display_connect`), bind the core globals via a registry listener (`wl_compositor`, `wl_shell`/`xdg_wm_base`), print what globals the compositor advertises.
-- [ ] Task 2: create a `wl_surface` and get it on screen as a blank/solid-color window using `wl_shm` (CPU-side shared memory buffer, no GPU yet).
-- [ ] Task 3: swap the `wl_shm` buffer for an EGL-backed one (`wl_egl_window` + `eglCreateWindowSurface`), so you're rendering with GLES into a real on-screen window instead of a pbuffer.
-- [ ] Master Task: reproduce a minimal version of the project's own `WaylandPreviewWindow` — render your A3 textured-quad shader live into a real Wayland window, updating every frame, and handle window resize/close events correctly.
+## C1 — Wayland (three tracks: core Wayland, AGL, wayland-cxx-scanner)
+
+Order: C1a first (everything else assumes it), then C1b (AGL specifics), then C1c (Joel's repo, which builds on both).
+
+### C1a — Core Wayland [NOT STARTED]
+- [ ] Task 1: connect and list globals. `wl_display_connect`, `wl_display_get_registry`, a registry listener that prints every global's interface name and version. Compare against `wayland-info` on the same machine.
+- [ ] Task 2: solid-colour window with `wl_shm`. Bind `wl_compositor`, `wl_shm`, `xdg_wm_base`; create `wl_surface` -> `xdg_surface` -> `xdg_toplevel`; do the `configure` / `ack_configure` handshake; attach an shm buffer and commit. Answer for yourself: why must the first commit be empty and the buffer come only after the first configure?
+- [ ] Task 3: input. Bind `wl_seat`, get `wl_keyboard` and `wl_pointer`, print key and pointer events. Use xkbcommon to turn the keymap fd plus keycode into a real symbol.
+- [ ] Task 4: animation loop with `wl_surface.frame` callbacks (draw only when the compositor asks), plus handling window resize and close events.
+- [ ] Task 5: `wl_egl_window` + `eglCreateWindowSurface` (needs A2), clear to a colour with GLES, `eglSwapBuffers`. Understand who paces frames: the frame callback or the swap interval.
+- [ ] Task 6: `wp_presentation` feedback. Ask the compositor when a frame was actually presented, print the commit-to-present latency and refresh interval.
+- [ ] Task 7: `wl_subcompositor` subsurfaces: a child surface (e.g. a small overlay) positioned on top of a parent, committed independently.
+- [ ] Task 8: dmabuf as a `wl_buffer`. Use `zwp_linux_dmabuf_v1` to import a `gbm_bo` (from A1) as a `wl_buffer` and show it in the window with no copy. This is the zero-copy path, needs A1 and A4.
+- [ ] Master Task: a minimal version of the project's `WaylandPreviewWindow`: live GLES-rendered window (your A3 textured-quad shader), frame-callback paced, resizes and closes cleanly.
+
+### C1b — Automotive Grade Linux (agl-compositor and the agl_shell protocol) [NOT STARTED]
+Background (verified from the AGL docs/protocol pages): AGL does not use a desktop shell. Its compositor, `agl-compositor` (libweston based), adds private extensions, mainly `agl_shell`. It is a kiosk-style model: one client sets the background, other clients are normal `xdg_toplevel` windows that the shell shows or hides.
+Requests I found in the protocol docs: `set_background`, `set_panel`, `activate_app`, `ready`. The compositor shows nothing until a client calls `ready`. `set_panel` is not honoured if `set_background` was called on the same surface. I have not read the exact argument lists (for example the panel edge argument) or the event names, so Task 1 is to read the real protocol XML before writing code.
+- [ ] Task 1 (reading, no code): read the `agl-shell` and `agl-shell-desktop` protocols at wayland.app, and the agl-compositor docs. Write down for yourself the roles (background, panel, app), and who is allowed to bind `agl_shell`.
+- [ ] Task 2: get an agl-compositor to run against. Options: your RPi5/AGL image, or a desktop build/nested run if agl-compositor builds there. Confirm with your `C1a Task 1` listing that `agl_shell` appears among the globals.
+- [ ] Task 3: bind `agl_shell` and handle its events (a successful and a failed bind). Find out what happens if a second client tries to bind.
+- [ ] Task 4: set a background. `wl_shm` solid-colour surface, `agl_shell.set_background`, wait for the configure event, `ack_configure`, commit, then `ready`. Confirm nothing shows before `ready`.
+- [ ] Task 5: add a panel with `set_panel` (a small bar on one screen edge) next to the background.
+- [ ] Task 6: a normal `xdg_toplevel` app with an `app_id`, then use `activate_app` to show and hide it. See how the app_id ties the window to the shell's idea of an application.
+- [ ] Task 7: use `agl_shell_desktop` to list running apps and to activate one from a separate client (a tiny launcher).
+- [ ] Master Task: an AGL "camera app" surface: background or app window showing your live libcamera feed (B1 -> A2 -> C1a), with a panel, running on the real AGL image on the RPi.
+
+### C1c — wayland-cxx-scanner (Joel Winarske's repo, PR #90) [NOT STARTED]
+Source: github.com/jwinarske/wayland-cxx-scanner. PR #90 adds the `agl-presentation-egl` example. From the PR page: it renders an animated triangle into an offscreen FBO, then draws that texture on a screen-filling quad with a vignette (GLES2 has no `glBlitFramebuffer`). It reuses the `agl-presentation-shm` handshake (bind `agl_shell`, bind `xdg_wm_base`, empty commit) and uses `wp_presentation` feedback to measure commit-to-light latency. Other examples in the repo that matter to you: `minimal`, `simple-egl`, `key-input`, `subsurfaces`, `presentation-shm`, `agl-presentation-shm`, `ivi-presentation-shm`, `xdg-simple-dmabuf-vulkan`, `wayland-info`.
+- [ ] Task 1: clone and build the repo (meson), run `wayland-info`, `minimal` and `simple-egl` on your desktop compositor.
+- [ ] Task 2: read the scanner itself. Feed it a protocol XML (start with `xdg-shell`, then `agl-shell`) and read the generated C++. Compare with what `wayland-scanner` generates in C. What did the C++ layer add?
+- [ ] Task 3: read and build `agl-presentation-shm`. Map every line of its handshake onto your own C1b Tasks 3 and 4.
+- [ ] Task 4: read and build `agl-presentation-egl` (PR #90). Draw the two passes on paper (triangle -> FBO texture -> quad). Compare its EGL setup with your A2 code.
+- [ ] Task 5: reproduce its `wp_presentation` latency measurement in your own standalone code (C1a Task 6) and check that your numbers roughly agree with the example's output.
+- [ ] Task 6: rewrite the FBO pass without looking at the example: render your own animated shape to an FBO, then draw it on a quad with a fragment-shader effect (A3).
+- [ ] Master Task (stretch): a new example in that style, e.g. `agl-presentation-dmabuf`: an AGL background client whose texture comes from a dma-buf (your camera or a `gbm_bo`), with the same latency measurement. If it turns out clean, it could be offered upstream as a PR, but that is your decision to make with the maintainers.
 
 ## D1 — Projective Geometry [NOT STARTED]
 - [ ] Task 1: by hand (no OpenCV), implement a 3x3 homography apply function — given a matrix and a point, compute the projected point including the perspective divide, and verify against a known simple case (e.g. a pure scale+translate matrix).
