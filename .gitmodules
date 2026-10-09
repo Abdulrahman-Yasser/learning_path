@@ -1,0 +1,3 @@
+[submodule "external/opengles3-book"]
+	path = external/opengles3-book
+	url = https://github.com/danginsburg/opengles3-book.git
